@@ -45,42 +45,29 @@ app.post('/send-sms', (req, res) => {
 
 // Webhook endpoint to handle incoming messages from SlickText
 app.post('/webhook/sms', (req, res) => {
-  console.log('Full request body:', req.body); // Log the full request body for debugging
-  const { Event, Timestamp, attemptNumber, ChatThread, ChatMessage, Textwords } = req.body;
+  const ChatMessage = req.body.ChatMessage;
 
-  // Log the incoming webhook data
-  console.log('Webhook received:', req.body);
+  // Check if ChatMessage and necessary fields exist
+  if (!ChatMessage || !ChatMessage.FromNumber || !ChatMessage.Body) {
+    console.error('Webhook received with incomplete or missing ChatMessage data:', req.body);
+    res.status(400).send('Incomplete or missing ChatMessage data');
+    return;
+  }
 
-  // Map the incoming webhook data to Airtable fields
+  // Prepare the data for Airtable
   const airtableData = {
-    'Event': Event,
-    'Timestamp': Timestamp,
-    'AttemptNumber': attemptNumber,
-    'ChatThreadId': ChatThread?.ChatThreadId,
-    'WithNumber': ChatThread?.WithNumber,
-    'ChatThreadDateCreated': ChatThread?.DateCreated,
-    'ChatMessageId': ChatMessage?.ChatMessageId,
-    'FromNumber': ChatMessage?.FromNumber,
-    'ToNumber': ChatMessage?.ToNumber,
-    'Body': ChatMessage?.Body,
-    'MessageRead': ChatMessage?.MessageRead.toString(), // Convert boolean to string if necessary
-    'Received': ChatMessage?.Received,
-    'TextwordId': Textwords?.[0]?.TextwordId, // Assuming Textwords is an array and we're interested in the first item
-    'Textword': Textwords?.[0]?.Textword,
-    'Description': Textwords?.[0]?.Description,
-    'AutoReply': Textwords?.[0]?.AutoReply,
+    'FromNumber': ChatMessage.FromNumber,
+    'Body': ChatMessage.Body,
   };
 
-  // Add the mapped data to Airtable
+  // Add the data to Airtable
   base(process.env.AIRTABLE_TABLE_NAME).create([{ "fields": airtableData }], function(err, records) {
     if (err) {
       console.error('Error adding to Airtable:', err);
       res.status(500).send('Error processing webhook');
       return;
     }
-    records.forEach(function(record) {
-      console.log('Added to Airtable:', record.getId());
-    });
+    console.log('Added to Airtable:', records[0].getId());
     res.status(200).send('Webhook received and processed');
   });
 });
