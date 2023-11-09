@@ -2,6 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const Airtable = require('airtable');
+const crypto = require('crypto'); // Include the crypto module for signature verification
 
 // Initialize express app
 const app = express();
@@ -45,6 +46,21 @@ app.post('/send-sms', (req, res) => {
 
 // Webhook endpoint to handle incoming messages from SlickText
 app.post('/webhook/sms', (req, res) => {
+  // Retrieve the X-Slicktext-Signature header
+  const signature = req.headers['x-slicktext-signature'];
+
+  // Compute the HMAC digest
+  const expectedSignature = crypto
+    .createHmac('md5', process.env.SLICKTEXT_WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  // Validate the request
+  if (signature !== expectedSignature) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  // If signature matches, process the webhook data
   const ChatMessage = req.body.ChatMessage;
 
   // Check if ChatMessage and necessary fields exist
