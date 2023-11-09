@@ -45,23 +45,30 @@ app.post('/send-sms', (req, res) => {
 
 // Webhook endpoint to handle incoming messages from SlickText
 app.post('/webhook/sms', (req, res) => {
-  const eventData = req.body;
+  console.log('Full request body:', req.body); // Log the full request body for debugging
+  const { Event, Timestamp, attemptNumber, ChatThread, ChatMessage, Textwords } = req.body;
 
   // Log the incoming webhook data
-  console.log('Webhook received:', eventData);
+  console.log('Webhook received:', req.body);
 
-  // Explicitly map the incoming webhook data to Airtable fields
+  // Map the incoming webhook data to Airtable fields
   const airtableData = {
-    'Event': eventData.Event,
-    'Timestamp': eventData.Timestamp,
-    'AttemptNumber': eventData.attemptNumber,
-    'MessageId': eventData.Message.MessageId,
-    'DateScheduled': eventData.Message.DateScheduled,
-    'DateSent': eventData.Message.DateSent,
-    'TextwordId': eventData.Message.TextwordId,
-    'CampaignName': eventData.Message.CampaignName,
-    'Body': eventData.Message.Body,
-    // ... add more fields as necessary
+    'Event': Event,
+    'Timestamp': Timestamp,
+    'AttemptNumber': attemptNumber,
+    'ChatThreadId': ChatThread?.ChatThreadId,
+    'WithNumber': ChatThread?.WithNumber,
+    'ChatThreadDateCreated': ChatThread?.DateCreated,
+    'ChatMessageId': ChatMessage?.ChatMessageId,
+    'FromNumber': ChatMessage?.FromNumber,
+    'ToNumber': ChatMessage?.ToNumber,
+    'Body': ChatMessage?.Body,
+    'MessageRead': ChatMessage?.MessageRead.toString(), // Convert boolean to string if necessary
+    'Received': ChatMessage?.Received,
+    'TextwordId': Textwords?.[0]?.TextwordId, // Assuming Textwords is an array and we're interested in the first item
+    'Textword': Textwords?.[0]?.Textword,
+    'Description': Textwords?.[0]?.Description,
+    'AutoReply': Textwords?.[0]?.AutoReply,
   };
 
   // Add the mapped data to Airtable
