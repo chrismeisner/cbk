@@ -1,12 +1,20 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const Airtable = require('airtable');
 
 // Initialize express app
 const app = express();
 
 // Use body-parser to parse JSON bodies into JS objects
 app.use(bodyParser.json());
+
+// Set up Airtable configuration
+Airtable.configure({
+  endpointUrl: 'https://api.airtable.com',
+  apiKey: process.env.AIRTABLE_PERSONAL_ACCESS_TOKEN
+});
+const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
 // Axios instance for SlickText API with authentication
 const slickTextAxios = axios.create({
@@ -37,16 +45,28 @@ app.post('/send-sms', (req, res) => {
 
 // Webhook endpoint to handle incoming messages from SlickText
 app.post('/webhook/sms', (req, res) => {
-  // Assuming the body's data structure is the way SlickText sends it
   const eventData = req.body;
 
   // Log the incoming webhook data
   console.log('Webhook received:', eventData);
 
-  // Here you can add logic to handle the incoming data
-  
-  // Respond to SlickText to acknowledge receipt of the webhook
-  res.status(200).send('Webhook received');
+  // Add the data to Airtable
+  base(process.env.AIRTABLE_TABLE_NAME).create([
+    {
+      "fields": eventData // Assuming eventData is an object with field names matching your Airtable column names
+    }
+  ], function(err, records) {
+    if (err) {
+      console.error('Error adding to Airtable:', err);
+      res.status(500).send('Error processing webhook');
+      return;
+    }
+    records.forEach(function(record) {
+      console.log('Added to Airtable:', record.getId());
+    });
+    // Respond to SlickText to acknowledge receipt of the webhook
+    res.status(200).send('Webhook received and processed');
+  });
 });
 
 // Define a route for the index page
