@@ -50,12 +50,22 @@ app.post('/webhook/sms', (req, res) => {
   // Log the incoming webhook data
   console.log('Webhook received:', eventData);
 
-  // Add the data to Airtable
-  base(process.env.AIRTABLE_TABLE_NAME).create([
-    {
-      "fields": eventData // Assuming eventData is an object with field names matching your Airtable column names
-    }
-  ], function(err, records) {
+  // Explicitly map the incoming webhook data to Airtable fields
+  const airtableData = {
+    'Event': eventData.Event,
+    'Timestamp': eventData.Timestamp,
+    'AttemptNumber': eventData.attemptNumber,
+    'MessageId': eventData.Message.MessageId,
+    'DateScheduled': eventData.Message.DateScheduled,
+    'DateSent': eventData.Message.DateSent,
+    'TextwordId': eventData.Message.TextwordId,
+    'CampaignName': eventData.Message.CampaignName,
+    'Body': eventData.Message.Body,
+    // ... add more fields as necessary
+  };
+
+  // Add the mapped data to Airtable
+  base(process.env.AIRTABLE_TABLE_NAME).create([{ "fields": airtableData }], function(err, records) {
     if (err) {
       console.error('Error adding to Airtable:', err);
       res.status(500).send('Error processing webhook');
@@ -64,7 +74,6 @@ app.post('/webhook/sms', (req, res) => {
     records.forEach(function(record) {
       console.log('Added to Airtable:', record.getId());
     });
-    // Respond to SlickText to acknowledge receipt of the webhook
     res.status(200).send('Webhook received and processed');
   });
 });
