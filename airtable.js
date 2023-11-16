@@ -7,7 +7,7 @@ const {
 	AIRTABLE_BASE_ID,
 	AIRTABLE_PERSONAL_ACCESS_TOKEN,
 	AIRTABLE_TABLE_NAME = "DefaultTableName",
-	DAY_OFFSET = "-1" // This will be the new environment variable to set the day offset
+	DAY_OFFSET = "0" // This will be the new environment variable to set the day offset
 } = process.env;
 
 
