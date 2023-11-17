@@ -7,7 +7,7 @@ const {
 	AIRTABLE_BASE_ID,
 	AIRTABLE_PERSONAL_ACCESS_TOKEN,
 	AIRTABLE_TABLE_NAME = "DefaultTableName",
-	DAY_OFFSET = "0" // This will be the new environment variable to set the day offset
+	DAY_OFFSET = "-2" // This will be the new environment variable to set the day offset
 } = process.env;
 
 
@@ -210,11 +210,24 @@ async function main() {
 	try {
 		// Convert DAY_OFFSET to an integer
 		const dayOffset = parseInt(DAY_OFFSET, 10);
-		const targetDate = new Date();
-		targetDate.setDate(targetDate.getDate() + dayOffset); // Adjust the date based on the DAY_OFFSET
 
-		const datesToProcess = [formatDate(targetDate)]; // Process only the calculated target date
+		// Initialize the datesToProcess array
+		const datesToProcess = [];
 
+		// If DAY_OFFSET is 0, process today's date
+		if (dayOffset === 0) {
+			const todayDate = new Date();
+			datesToProcess.push(formatDate(todayDate));
+		} else {
+			// For negative DAY_OFFSET, process dates going back
+			for (let i = 0; i < Math.abs(dayOffset); i++) {
+				const targetDate = new Date();
+				targetDate.setDate(targetDate.getDate() - i);
+				datesToProcess.push(formatDate(targetDate));
+			}
+		}
+
+		// Process the calculated dates
 		await processDateRange(datesToProcess);
 
 		console.log('✨ NBA Airtable Update completed successfully!');
