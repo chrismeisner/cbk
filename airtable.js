@@ -2,35 +2,33 @@ require('dotenv').config();
 const axios = require('axios');
 const Airtable = require('airtable');
 
+// Airtable configuration
 const {
-  AIRTABLE_BASE_ID,
-  AIRTABLE_PERSONAL_ACCESS_TOKEN,
-  AIRTABLE_TABLE_NAME = "DefaultTableName"
+	AIRTABLE_BASE_ID,
+	AIRTABLE_PERSONAL_ACCESS_TOKEN,
+	AIRTABLE_TABLE_NAME = "DefaultTableName",
+	DAY_OFFSET = "0"
 } = process.env;
 
 const NBA_API_URL = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
 
-// Configure Airtable
 Airtable.configure({
-  endpointUrl: 'https://api.airtable.com',
-  apiKey: AIRTABLE_PERSONAL_ACCESS_TOKEN
+	endpointUrl: 'https://api.airtable.com',
+	apiKey: AIRTABLE_PERSONAL_ACCESS_TOKEN
 });
+
 const base = Airtable.base(AIRTABLE_BASE_ID);
 const table = base(AIRTABLE_TABLE_NAME);
-const eventsTable = base('Events'); // Add reference to the "Events" table
-const teamsTable = base('Teams'); // Reference to the "Teams" table
-
 
 async function fetchNBAData(date) {
-  try {
-	console.log(`🔍 Fetching NBA data for date: ${date}...`);
-	const response = await axios.get(`${NBA_API_URL}?dates=${date}`);
-	console.log(`🏀 NBA data for ${date} fetched successfully!`);
-	return response.data;
-  } catch (error) {
-	console.error(`❌ Error fetching NBA data for ${date}:`, error);
-	throw error;
-  }
+	try {
+		console.log(`🔍 Fetching NBA data for date: ${date}...`);
+		const response = await axios.get(`${NBA_API_URL}?dates=${date}`);
+		console.log(`🏀 NBA data for ${date} fetched successfully!`);
+		return response.data;
+	} catch (error) {
+		console.error(`❌ Error fetching NBA data for ${date}:`, error);
+	}
 }
 
 function extractData(nbaData) {
@@ -48,6 +46,15 @@ function extractData(nbaData) {
 	const broadcastText = broadcasts && broadcasts.length > 0 ? broadcasts.flatMap(b => b.names).join(", ") : "";
 	const period = event.status.period;
 	const clock = event.status.displayClock;
+	const headlines = event.competitions[0].headlines;
+	const homeRecord = homeTeam && homeTeam.records ? homeTeam.records.find(r => r.type === 'home')?.summary : "";
+	const awayRecord = awayTeam && awayTeam.records ? awayTeam.records.find(r => r.type === 'road')?.summary : "";
+	const shortLinkText = headlines && headlines.length > 0 ? headlines[0].shortLinkText : "";
+
+	// Extract city and state from the venue's address
+	const eventVenue = event.competitions[0].venue;
+	const eventCity = eventVenue && eventVenue.address ? eventVenue.address.city : "";
+	const eventState = eventVenue && eventVenue.address ? eventVenue.address.state : "";
 
 	// Parse scores as numbers
 	const homeTeamScore = parseInt(homeTeam.score, 10);
@@ -80,7 +87,12 @@ function extractData(nbaData) {
 		'Opponent Score NBA': parsedAwayTeamScore,
 		'Team Record': homeTeamRecord,
 		'Period': period,
-		'Clock': clock
+		'Home Record': homeTeam.homeAway === 'home' ? homeRecord : awayRecord,
+		'Clock': clock,
+		'Event City': eventCity,
+		'Headline': shortLinkText, // Add the shortLinkText as the Headline		
+		'Event State': eventState
+		
 	  });
 	}
 
@@ -104,7 +116,11 @@ function extractData(nbaData) {
 		'Opponent Score NBA': parsedHomeTeamScore,
 		'Team Record': awayTeamRecord,
 		'Period': period,
-		'Clock': clock
+		'Away Record': awayTeam.homeAway === 'away' ? awayRecord : homeRecord,
+		'Clock': clock,
+		'Event City': eventCity,
+		'Headline': shortLinkText, // Add the shortLinkText as the Headline
+		'Event State': eventState
 	  });
 	}
   });
@@ -112,46 +128,19 @@ function extractData(nbaData) {
   return records;
 }
 
-async function updateEventsFromBetaTable() {
-  try {
-	const betaRecords = await table.select({
-	  fields: ['Event ID', 'Team Name', 'Home Away']
-	}).all();
-
-	for (const record of betaRecords) {
-	  const { 'Event ID': eventId, 'Team Name': teamName, 'Home Away': homeAway } = record.fields;
-	  if (!eventId || !teamName || !homeAway) continue;
-
-	  // Find the team record in the "Teams" table based on the team name
-	  const [teamRecord] = await teamsTable.select({
-		maxRecords: 1,
-		filterByFormula: `{Team Name} = "${teamName}"`
-	  }).firstPage();
-
-	  if (teamRecord) {
-		const teamRecordId = teamRecord.id;
-		const fieldToUpdate = homeAway === 'Home' ? 'Home Team Link' : 'Away Team Link';
-
-		// Find the matching event record in the "Events" table
-		const [eventRecord] = await eventsTable.select({
-		  maxRecords: 1,
-		  filterByFormula: `{Event ID} = "${eventId}"`
+async function findMostRecentRecordForTeam(teamName, currentEventID, currentEventTime) {
+	try {
+		const records = await table.select({
+			maxRecords: 1,
+			sort: [{field: "Event Time", direction: "desc"}],
+			filterByFormula: `AND({Team Name} = "${teamName}", {Event Time} < "${currentEventTime}", NOT({Event ID} = "${currentEventID}"))`
 		}).firstPage();
 
-		if (eventRecord) {
-		  const updateFields = {};
-		  updateFields[fieldToUpdate] = [teamRecordId]; // Link to the team record
-
-		  await eventsTable.update([{ id: eventRecord.id, fields: updateFields }]);
-		  console.log(`Updated Event ID: ${eventId} with ${fieldToUpdate}: ${teamName} (Link)`);
-		}
-	  } else {
-		console.log(`Team "${teamName}" not found in the "Teams" table.`);
-	  }
+		return records.length > 0 ? records[0].id : null;
+	} catch (err) {
+		console.error(`Error finding most recent record for team ${teamName}:`, err);
+		return null;
 	}
-  } catch (error) {
-	console.error(`Error updating the "Events" table with team links:`, error);
-  }
 }
 
 async function getExistingRecordID(eventID, homeAway) {
@@ -173,184 +162,217 @@ async function getExistingRecordID(eventID, homeAway) {
   }
 }
 
-async function upsertRecord(record, eventRecordIds) {
-  try {
-	const existingRecordID = await getExistingRecordID(record['Event ID'], record['Home Away']);
-	let fieldsToUpdate = { ...record };
+async function upsertRecord(record) {
+	try {
+		// Fetch team record ID and event record ID (or create it if doesn't exist)
+		const teamRecordID = await getTeamRecordID(record['Team Name']);
+		const eventRecordID = await getOrCreateEventRecordID(record['Event ID']);
 
-	// Check each field for undefined or empty string before updating
-	Object.keys(fieldsToUpdate).forEach(key => {
-	  if (fieldsToUpdate[key] === "" || fieldsToUpdate[key] === undefined) {
-		delete fieldsToUpdate[key];
-	  }
-	});
+		if (teamRecordID) {
+			record['Team'] = [teamRecordID]; // Linking to the "Teams" table
+		}
+		if (eventRecordID) {
+			record['Event'] = [eventRecordID]; // Linking to the "Events" table
 
+			// Determine whether the team is home or away and update the corresponding link in the Events table
+			let updateFields = {};
+			if (record['Home Away'] === 'Home') {
+				updateFields['Home Team Link'] = [teamRecordID];
+			} else if (record['Home Away'] === 'Away') {
+				updateFields['Away Team Link'] = [teamRecordID];
+			}
 
-	// Link to the "Events" table using Event ID
-	const eventId = record['Event ID'];
-	if (eventId && eventRecordIds[eventId]) {
-	  fieldsToUpdate['Event'] = [eventRecordIds[eventId]]; // Link to the corresponding event record
+			// Update the Events table
+			if (Object.keys(updateFields).length > 0) {
+				await base('Events').update([{ "id": eventRecordID, "fields": updateFields }]);
+			}
+		}
+
+		const currentEventID = record['Event ID']; 
+		const currentEventTime = record['Event Time']; // Ensure this is the correct format
+		const mostRecentRecordID = await findMostRecentRecordForTeam(record['Team Name'], currentEventID, currentEventTime);
+		
+		if (mostRecentRecordID) {
+			record['Previous'] = [mostRecentRecordID]; // Linking to the most recent record
+		}
+
+		// Check if the event already exists in the Airtable
+		const existingRecordID = await getExistingRecordID(record['Event ID'], record['Home Away']);
+		let fieldsToUpdate = { ...record };
+
+		// Remove fields that are undefined or empty strings
+		Object.keys(fieldsToUpdate).forEach(key => {
+			if (fieldsToUpdate[key] === "" || fieldsToUpdate[key] === undefined) {
+				delete fieldsToUpdate[key];
+			}
+		});
+
+		// Update or create the record in the Airtable
+		if (existingRecordID) {
+			await table.update([{ "id": existingRecordID, "fields": fieldsToUpdate }]);
+		} else {
+			await table.create([{ "fields": fieldsToUpdate }]);
+		}
+	} catch (error) {
+		console.error(`Error in upsertRecord: ${error}`);
+		// Handle the error as needed
 	}
-
-	// Update or create record in the "01 Beta" table
-	if (existingRecordID) {
-	  console.log(`🔄 Updating record for Event: ${record['Event ID']} | Teams: ${record['Team Name']} vs ${record['Opponent Team Name']}`);
-	  await table.update([{ "id": existingRecordID, "fields": fieldsToUpdate }]);
-	  console.log(`✅ Record for Event ID: ${record['Event ID']} updated successfully.`);
-	} else {
-	  console.log(`➕ Creating new record for Event: ${record['Event ID']} | Teams: ${record['Team Name']} vs ${record['Opponent Team Name']} | Event Time: ${record['Event Time']}`);
-	  await table.create([{ "fields": fieldsToUpdate }]);
-	  console.log(`🎉 New record for Event ID: ${record['Event ID']} created successfully.`);
-	}
-  } catch (error) {
-	console.error(`❌ Error in upsertRecord for Event ID: ${record['Event ID']} | Teams: ${record['Team Name']} vs ${record['Opponent Team Name']}:`, error);
-  }
 }
 
 async function processDateRange(fetchDates) {
-  for (const date of fetchDates) {
-	const nbaData = await fetchNBAData(date);
-	if (nbaData) {
-	  const records = extractData(nbaData);
-	  for (const record of records) {
-		await upsertRecord(record);
-	  }
-	} else {
-	  console.log(`No NBA data fetched for date: ${date}`);
+	for (const date of fetchDates) {
+		const nbaData = await fetchNBAData(date);
+		if (nbaData) {
+			const records = extractData(nbaData);
+			for (const record of records) {
+				await upsertRecord(record);
+			}
+		} else {
+			console.log(`No NBA data fetched for date: ${date}`);
+		}
 	}
-  }
+}
+
+async function getOrCreateEventRecordID(eventID) {
+	try {
+		const records = await base('Events').select({
+			maxRecords: 1,
+			filterByFormula: `{Event ID} = "${eventID}"`
+		}).firstPage();
+
+		// If the event already exists, return its ID
+		if (records.length > 0) {
+			return records[0].id;
+		} else {
+			// If the event does not exist, create it
+			const createdRecord = await base('Events').create([{ fields: { 'Event ID': eventID } }]);
+			return createdRecord[0].id;
+		}
+	} catch (err) {
+		console.error(`Error handling Event record for Event ID: ${eventID}`, err);
+		return null;
+	}
+}
+
+async function getTeamRecordID(teamName) {
+	try {
+		const records = await base('Teams').select({
+			maxRecords: 1,
+			filterByFormula: `{Team Name} = "${teamName}"`
+		}).firstPage();
+
+		return records.length > 0 ? records[0].id : null;
+	} catch (err) {
+		console.error(`Error fetching Team record ID for Team Name: ${teamName}`, err);
+		return null;
+	}
+}
+
+function getDateForKey(key, days = -10) {
+	const now = new Date();
+	switch (key) {
+		case 'yesterday':
+			now.setDate(now.getDate() - 1);
+			break;
+		case 'tomorrow':
+			now.setDate(now.getDate() + 1);
+			break;
+		case 'daysBack':
+			now.setDate(now.getDate() - days);
+			break;
+		case 'daysAhead':
+			now.setDate(now.getDate() + days); // New case for days ahead
+			break;
+		case 'today':
+		default:
+			break;
+	}
+	return now.toISOString().split('T')[0].replace(/-/g, '');
 }
 
 function formatDate(date) {
-  return date.toISOString().split('T')[0].replace(/-/g, '');
+	return date.toISOString().split('T')[0].replace(/-/g, '');
 }
 
-async function createEventsRecordIfNotExists(eventsData) {
-  try {
-	const eventIds = eventsData.map(event => event.id);
-	const existingEventIds = await fetchEventRecordIds(eventIds);
+async function updateRank() {
+	const table = base('Teams');
+	try {
+		// Step 1: Copy current Rank to Rank Yesterday
+		let updatePromises = [];
+		const recordsToUpdate = await table.select({
+			filterByFormula: `{League} = 'NBA'`,
+			fields: ["Rank"] // Fetch only the Rank field
+		}).all();
 
-	const newEvents = eventsData.filter(event => !existingEventIds[event.id]);
+		recordsToUpdate.forEach(record => {
+			updatePromises.push(
+				table.update(record.id, {
+					"Rank Yesterday": record.get("Rank")
+				})
+			);
+		});
 
-	if (newEvents.length === 0) {
-	  console.log('✅ No new events to create in the "Events" table.');
-	  return;
-	}
+		// Wait for all updates to finish
+		await Promise.all(updatePromises);
+		console.log('Rank to Rank Yesterday copy completed.');
 
-	let eventRecords = newEvents.map(event => {
-	  return {
-		'fields': {
-		  'Event ID': event.id,
-		  'Event Time': event.date,
-		  'Status ID': event.status && event.status.type && event.status.type.id ? event.status.type.id : "", // Add the Status ID field
+		// Step 2: Fetch records sorted by ATS AVG where League is NBA and update Rank
+		const records = await table.select({
+			filterByFormula: `{League} = 'NBA'`,
+			sort: [{ field: "ATS AVG", direction: "desc" }],
+			fields: ["ATS AVG"] // Include only necessary fields
+		}).all();
+
+		// Update each record with its new rank
+		for (let i = 0; i < records.length; i++) {
+			const record = records[i];
+			const rank = i + 1;
+			console.log(`Updating record ${record.id}, ATS AVG: ${record.get("ATS AVG")}, Rank: ${rank}`);
+
+			await table.update(record.id, {
+				"Rank": rank
+			});
 		}
-	  };
-	});
 
-	console.log(`➕ Creating new records in the "Events" table...`);
-	await eventsTable.create(eventRecords);
-	console.log(`🎉 New records in the "Events" table created successfully.`);
-  } catch (error) {
-	console.error(`❌ Error creating records in the "Events" table:`, error);
-  }
-}
-
-async function fetchEventRecordIds(eventIds) {
-  try {
-	let recordIds = {};
-	const records = await eventsTable.select({
-	  filterByFormula: `OR(${eventIds.map(id => `{Event ID} = "${id}"`).join(", ")})`
-	}).all();
-
-	records.forEach(record => {
-	  recordIds[record.fields['Event ID']] = record.id;
-	});
-
-	return recordIds;
-  } catch (error) {
-	console.error(`❌ Error fetching records from the "Events" table:`, error);
-  }
-}
-
-async function updateTeamNextLastEvents(teamName, eventRecordIdNext, eventRecordIdLast) {
-  try {
-	// Fetch the record in the "Teams" table with the given teamName
-	const teamRecords = await teamsTable.select({
-	  filterByFormula: `{Team Name} = "${teamName}"`
-	}).firstPage();
-
-	if (teamRecords.length > 0) {
-	  // Update the "Next Event" and "Last Event" fields if you have valid record IDs
-	  const teamRecord = teamRecords[0];
-	  const updateFields = {};
-
-	  if (eventRecordIdNext) {
-		updateFields["Next Event"] = [eventRecordIdNext];
-	  }
-
-	  if (eventRecordIdLast) {
-		updateFields["Last Event"] = [eventRecordIdLast];
-	  }
-
-	  // Update the record in the "Teams" table
-	  await teamsTable.update([{ id: teamRecord.id, fields: updateFields }]);
-	  console.log(`✅ "Next Event" and "Last Event" updated for Team: ${teamName}`);
-	} else {
-	  console.log(`❌ Team "${teamName}" not found in the "Teams" table.`);
+		console.log('Ranks updated successfully.');
+	} catch (error) {
+		console.error('Error updating ranks:', error);
 	}
-  } catch (error) {
-	console.error(`❌ Error updating "Next Event" and "Last Event" for Team: ${teamName}:`, error);
-  }
 }
+
 
 async function main() {
-  console.log('🚀 Starting NBA Airtable Update...');
+	console.log('🚀 Starting NBA Airtable Update...');
 
-  try {
-	// Fetch NBA data for the current date
-	const nbaData = await fetchNBAData(formatDate(new Date()));
+	try {
+		// Process NBA data
+		const dayOffset = parseInt(DAY_OFFSET, 10);
+		const targetDate = new Date();
+		targetDate.setDate(targetDate.getDate() + dayOffset);
+		const formattedTargetDate = formatDate(targetDate);
 
-	if (nbaData && nbaData.events) {
-	  // Create new records in the "Events" table if they don't exist
-	  await createEventsRecordIfNotExists(nbaData.events);
-
-	  // Fetch the event record IDs from the "Events" table
-	  const eventIds = nbaData.events.map(event => event.id);
-	  const eventRecordIds = await fetchEventRecordIds(eventIds);
-
-	  // Extract data from the NBA data and process each record
-	  const records = extractData(nbaData);
-	  for (const record of records) {
-		const eventID = record['Event ID'];
-		if (!eventRecordIds[eventID]) {
-		  console.log(`❌ Event ID ${eventID} does not exist in the "Events" table.`);
-		  continue;
+		console.log(`Processing NBA data for date: ${formattedTargetDate}`);
+		const nbaData = await fetchNBAData(formattedTargetDate);
+		if (nbaData) {
+			const records = extractData(nbaData);
+			for (const record of records) {
+				await upsertRecord(record);
+			}
+		} else {
+			console.log(`No NBA data fetched for date: ${formattedTargetDate}`);
 		}
 
-		try {
-		  // Update "Status ID" in the "Events" table
-		  const eventStatusID = record['Status ID'];
-		  if (eventStatusID) {
-			await eventsTable.update([{ "id": eventRecordIds[eventID], "fields": { "Status ID": eventStatusID } }]);
-		  }
+		// Update Ranks in Airtable
+		console.log('Updating Team Ranks...');
+		await updateRank();
+		console.log('Team Ranks updated successfully.');
 
-		  // Upsert record in "01 Beta" table
-		  await upsertRecord(record, eventRecordIds);
-		  console.log(`✅ Record for Event ID: ${eventID} updated successfully.`);
-		} catch (upsertError) {
-		  console.error(`❌ Error updating record for Event ID: ${eventID}:`, upsertError);
-		}
-	  }
+		console.log('✨ NBA Airtable Update completed successfully!');
+	} catch (error) {
+		console.error('⚠️ An error occurred during the NBA Airtable Update:', error);
+		process.exit(1);
 	}
-
-	// Update the "Events" table based on "Home Away" data from the "01 Beta" table
-	await updateEventsFromBetaTable();
-
-	console.log('✨ NBA Airtable Update including "Events" table completed successfully!');
-  } catch (error) {
-	console.error('⚠️ An error occurred during the NBA Airtable Update:', error);
-	process.exit(1);
-  }
 }
 
 main();
+

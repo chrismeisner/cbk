@@ -316,18 +316,18 @@ async function updateRank() {
 		await Promise.all(updatePromises);
 		console.log('Rank to Rank Yesterday copy completed.');
 
-		// Step 2: Fetch records sorted by ATS TOT where League is NBA and update Rank
+		// Step 2: Fetch records sorted by ATS AVG where League is NBA and update Rank
 		const records = await table.select({
 			filterByFormula: `{League} = 'NBA'`,
-			sort: [{ field: "ATS TOT", direction: "desc" }],
-			fields: ["ATS TOT"] // Include only necessary fields
+			sort: [{ field: "ATS AVG", direction: "desc" }],
+			fields: ["ATS AVG"] // Include only necessary fields
 		}).all();
 
 		// Update each record with its new rank
 		for (let i = 0; i < records.length; i++) {
 			const record = records[i];
 			const rank = i + 1;
-			console.log(`Updating record ${record.id}, ATS TOT: ${record.get("ATS TOT")}, Rank: ${rank}`);
+			console.log(`Updating record ${record.id}, ATS AVG: ${record.get("ATS AVG")}, Rank: ${rank}`);
 
 			await table.update(record.id, {
 				"Rank": rank
