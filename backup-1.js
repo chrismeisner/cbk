@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const Airtable = require('airtable');
 
+// Load values from .env and set defaults
 const {
   AIRTABLE_BASE_ID,
   AIRTABLE_PERSONAL_ACCESS_TOKEN,
@@ -20,7 +21,6 @@ const table = base(AIRTABLE_TABLE_NAME);
 const eventsTable = base('Events'); // Add reference to the "Events" table
 const teamsTable = base('Teams'); // Reference to the "Teams" table
 
-
 async function fetchNBAData(date) {
   try {
 	console.log(`🔍 Fetching NBA data for date: ${date}...`);
@@ -29,7 +29,7 @@ async function fetchNBAData(date) {
 	return response.data;
   } catch (error) {
 	console.error(`❌ Error fetching NBA data for ${date}:`, error);
-	throw error;
+	throw error; // Rethrow the error to be handled by the caller
   }
 }
 
@@ -110,48 +110,6 @@ function extractData(nbaData) {
   });
 
   return records;
-}
-
-async function updateEventsFromBetaTable() {
-  try {
-	const betaRecords = await table.select({
-	  fields: ['Event ID', 'Team Name', 'Home Away']
-	}).all();
-
-	for (const record of betaRecords) {
-	  const { 'Event ID': eventId, 'Team Name': teamName, 'Home Away': homeAway } = record.fields;
-	  if (!eventId || !teamName || !homeAway) continue;
-
-	  // Find the team record in the "Teams" table based on the team name
-	  const [teamRecord] = await teamsTable.select({
-		maxRecords: 1,
-		filterByFormula: `{Team Name} = "${teamName}"`
-	  }).firstPage();
-
-	  if (teamRecord) {
-		const teamRecordId = teamRecord.id;
-		const fieldToUpdate = homeAway === 'Home' ? 'Home Team Link' : 'Away Team Link';
-
-		// Find the matching event record in the "Events" table
-		const [eventRecord] = await eventsTable.select({
-		  maxRecords: 1,
-		  filterByFormula: `{Event ID} = "${eventId}"`
-		}).firstPage();
-
-		if (eventRecord) {
-		  const updateFields = {};
-		  updateFields[fieldToUpdate] = [teamRecordId]; // Link to the team record
-
-		  await eventsTable.update([{ id: eventRecord.id, fields: updateFields }]);
-		  console.log(`Updated Event ID: ${eventId} with ${fieldToUpdate}: ${teamName} (Link)`);
-		}
-	  } else {
-		console.log(`Team "${teamName}" not found in the "Teams" table.`);
-	  }
-	}
-  } catch (error) {
-	console.error(`Error updating the "Events" table with team links:`, error);
-  }
 }
 
 async function getExistingRecordID(eventID, homeAway) {
@@ -307,24 +265,22 @@ async function main() {
   console.log('🚀 Starting NBA Airtable Update...');
 
   try {
-	// Fetch NBA data for the current date
+	// Fetch NBA data for today (or the date specified)
 	const nbaData = await fetchNBAData(formatDate(new Date()));
-
 	if (nbaData && nbaData.events) {
-	  // Create new records in the "Events" table if they don't exist
+	  // Create records in "Events" table if they don't already exist
 	  await createEventsRecordIfNotExists(nbaData.events);
 
-	  // Fetch the event record IDs from the "Events" table
 	  const eventIds = nbaData.events.map(event => event.id);
 	  const eventRecordIds = await fetchEventRecordIds(eventIds);
 
-	  // Extract data from the NBA data and process each record
+	  // Upsert records in "01 Beta" table with links to "Events" table and update "Status ID"
 	  const records = extractData(nbaData);
 	  for (const record of records) {
 		const eventID = record['Event ID'];
 		if (!eventRecordIds[eventID]) {
 		  console.log(`❌ Event ID ${eventID} does not exist in the "Events" table.`);
-		  continue;
+		  continue; // Skip processing this record
 		}
 
 		try {
@@ -337,19 +293,26 @@ async function main() {
 		  // Upsert record in "01 Beta" table
 		  await upsertRecord(record, eventRecordIds);
 		  console.log(`✅ Record for Event ID: ${eventID} updated successfully.`);
+
+		  // Update "Next Event" and "Last Event" in the "Teams" table
+		  if (eventStatusID === "1" || eventStatusID === "3") {
+			const teamName = record['Team Name'];
+			if (eventStatusID === "1") {
+			  await updateTeamNextLastEvents(teamName, eventRecordIds[eventID], null);
+			} else if (eventStatusID === "3") {
+			  await updateTeamNextLastEvents(teamName, null, eventRecordIds[eventID]);
+			}
+		  }
 		} catch (upsertError) {
 		  console.error(`❌ Error updating record for Event ID: ${eventID}:`, upsertError);
 		}
 	  }
 	}
 
-	// Update the "Events" table based on "Home Away" data from the "01 Beta" table
-	await updateEventsFromBetaTable();
-
 	console.log('✨ NBA Airtable Update including "Events" table completed successfully!');
   } catch (error) {
 	console.error('⚠️ An error occurred during the NBA Airtable Update:', error);
-	process.exit(1);
+	process.exit(1); // Exit with a non-zero status code to indicate an error
   }
 }
 

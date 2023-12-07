@@ -1,7 +1,5 @@
 const express = require('express');
 const app = express();
-
-// Use dynamic import for fetch
 let fetch;
 
 (async () => {
