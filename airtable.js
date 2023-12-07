@@ -7,7 +7,7 @@ const {
 	AIRTABLE_BASE_ID,
 	AIRTABLE_PERSONAL_ACCESS_TOKEN,
 	AIRTABLE_TABLE_NAME = "DefaultTableName",
-	DAY_OFFSET = "0"
+	DAY_OFFSET = "-1,0,1"
 } = process.env;
 
 const NBA_API_URL = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard';
@@ -345,21 +345,23 @@ async function main() {
 	console.log('🚀 Starting NBA Airtable Update...');
 
 	try {
-		// Process NBA data
-		const dayOffset = parseInt(DAY_OFFSET, 10);
-		const targetDate = new Date();
-		targetDate.setDate(targetDate.getDate() + dayOffset);
-		const formattedTargetDate = formatDate(targetDate);
+		// Split the DAY_OFFSET into an array and process each offset
+		const dayOffsets = DAY_OFFSET.split(',').map(offset => parseInt(offset, 10));
+		for (const dayOffset of dayOffsets) {
+			const targetDate = new Date();
+			targetDate.setDate(targetDate.getDate() + dayOffset);
+			const formattedTargetDate = formatDate(targetDate);
 
-		console.log(`Processing NBA data for date: ${formattedTargetDate}`);
-		const nbaData = await fetchNBAData(formattedTargetDate);
-		if (nbaData) {
-			const records = extractData(nbaData);
-			for (const record of records) {
-				await upsertRecord(record);
+			console.log(`Processing NBA data for date: ${formattedTargetDate}`);
+			const nbaData = await fetchNBAData(formattedTargetDate);
+			if (nbaData) {
+				const records = extractData(nbaData);
+				for (const record of records) {
+					await upsertRecord(record);
+				}
+			} else {
+				console.log(`No NBA data fetched for date: ${formattedTargetDate}`);
 			}
-		} else {
-			console.log(`No NBA data fetched for date: ${formattedTargetDate}`);
 		}
 
 		// Update Ranks in Airtable
@@ -375,4 +377,3 @@ async function main() {
 }
 
 main();
-
