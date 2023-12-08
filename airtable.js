@@ -340,11 +340,40 @@ async function updateRank() {
 	}
 }
 
+async function duplicateATSAVGField() {
+	try {
+		// Ensure to reference the "Teams" table specifically
+		const teamsTable = base('Teams'); // Replace 'YourTeamsTableName' with the actual name of your Teams table
+
+		const records = await teamsTable.select({
+			filterByFormula: `{League} = 'NBA'`,
+			fields: ["ATS AVG"] // Fetch the calculated value of the ATS AVG formula field
+		}).all();
+
+		let updatePromises = records.map(record => {
+			return teamsTable.update(record.id, {
+				"ATS AVG LAST": record.get("ATS AVG") // Update the ATS AVG LAST field with the value from ATS AVG
+			});
+		});
+
+		// Wait for all updates to complete
+		await Promise.all(updatePromises);
+		console.log('ATS AVG field values duplicated successfully to ATS AVG LAST.');
+	} catch (error) {
+		console.error('Error in duplicating ATS AVG field values:', error);
+	}
+}
+
 
 async function main() {
 	console.log('🚀 Starting NBA Airtable Update...');
 
 	try {
+		// First, duplicate the ATS AVG field values
+		console.log('Duplicating ATS AVG field values...');
+		await duplicateATSAVGField();
+		console.log('ATS AVG field values duplicated successfully.');
+
 		// Split the DAY_OFFSET into an array and process each offset
 		const dayOffsets = DAY_OFFSET.split(',').map(offset => parseInt(offset, 10));
 		for (const dayOffset of dayOffsets) {
