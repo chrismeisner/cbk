@@ -369,10 +369,15 @@ async function main() {
 	console.log('🚀 Starting NBA Airtable Update...');
 
 	try {
-		// First, duplicate the ATS AVG field values
+		// Duplicate the ATS AVG field values first
 		console.log('Duplicating ATS AVG field values...');
 		await duplicateATSAVGField();
 		console.log('ATS AVG field values duplicated successfully.');
+
+		// Update Ranks in Airtable as the next step
+		console.log('Updating Team Ranks...');
+		await updateRank();
+		console.log('Team Ranks updated successfully.');
 
 		// Split the DAY_OFFSET into an array and process each offset
 		const dayOffsets = DAY_OFFSET.split(',').map(offset => parseInt(offset, 10));
@@ -392,11 +397,6 @@ async function main() {
 				console.log(`No NBA data fetched for date: ${formattedTargetDate}`);
 			}
 		}
-
-		// Update Ranks in Airtable
-		console.log('Updating Team Ranks...');
-		await updateRank();
-		console.log('Team Ranks updated successfully.');
 
 		console.log('✨ NBA Airtable Update completed successfully!');
 	} catch (error) {
